@@ -1,0 +1,222 @@
+#include <stdio.h>                    
+#include <sys/mman.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <stdlib.h>
+#include <string.h>
+
+#define MAILBOX_BASE 0x40000000
+#define MAILBOX_OFFSET (0x00007000U) 
+#define MAILBOX_LEN 0x1000U 
+#define DIM 3
+
+
+int fd = -1; 
+unsigned int *memmap = NULL;
+
+unsigned int* init_mailbox()  {
+	unsigned int *result;
+	fd = open("/dev/mem", O_RDWR | O_SYNC); 
+						
+	if (fd < 0) {
+		printf("cannot open /dev/mem\n");
+		exit(-1);
+	}
+	result = (unsigned int*)mmap(NULL, MAILBOX_LEN, PROT_READ
+			| PROT_WRITE, MAP_SHARED, fd, MAILBOX_BASE + MAILBOX_OFFSET);
+	if (result == MAP_FAILED) {
+		printf("cannot mmap /dev/mem\n");
+		exit(-1);
+	}
+	memmap = result;
+	return result;
+}
+
+void close_mailbox() {
+	munmap(memmap, MAILBOX_LEN);
+	close(fd);
+}
+
+void float_to_int (float tot, int* integer) {
+	*integer=(int)tot;
+}
+
+void check_frequency (volatile unsigned int* mailbox, FILE* dati, int avg_int, int min, int max) {
+	if ((avg_int>=min)&&(avg_int<=max)) {
+		mailbox[3]=2;
+		fprintf(dati,"La frequenza media misurata rientra negli standard di normalità. \n Puoi fare sport tranquillamente\n\n\n\n");
+	} else {
+		mailbox[3]=1;
+		printf("Attenzione! Abbiamo registrato qualche problema: per maggiori informazioni guardare il file\n\n\n");
+		fprintf(dati, "La frequenza media misurata, non rientra nei valori di normalità. \n Non si consiglia, quindi, di svolgere allenamento, se non dopo un consulto medico\n\n\n\n");
+	}
+}
+
+int main() {
+	volatile unsigned int *mailbox;
+	int value;
+	int array[DIM];
+	float tot=0;
+	int tot_int;
+	int cont=0;
+	int sum=0;
+	float avg;
+	int avg_int;
+	int input;
+	int min=300;
+	int max=0;
+	char selection;
+	FILE* dati;
+	char name[100];
+	int age;
+	char date[9];
+	char gender[8];
+	int time;
+	int fmax;
+
+	mailbox = init_mailbox();
+
+	mailbox[0] = 0;
+	mailbox[1] = 0;
+	mailbox[2] = 0;
+	mailbox[3] = 0;
+
+	printf("\n");
+	printf("Buongiorno! Prima di cominciare, ti chiediamo qualche informazione\n\n");
+	usleep(500000);
+	printf("Inserisci il tuo nome e cognome, sostituendo lo spazio con un backslash\n");
+	scanf("%s", name);
+	dati=fopen(name,"a");  
+	do {
+		printf("Inserisci la tua età\n");
+		scanf("%d", &age);
+	} while (age<0);
+	fprintf(dati,"Età: %d \n" ,age);
+	do {
+		printf("Inserisci il sesso (maschio/femmina)\n");
+		scanf("%s", gender);
+	} while ((strcmp(gender, "femmina")!=0) && (strcmp(gender, "maschio")!=0)); 
+	fprintf(dati, "Sesso: %s \n" ,gender);
+	printf("Inserisci la data di oggi (gg/mm/aa)\n");
+	scanf("%s", date);
+	fprintf(dati, "Data: %s \n" ,date);
+	do {
+		printf("Se hai appena compiuto attività fisica digita 'a', se sei a riposo digita 'r': \n");
+		scanf(" %c",&selection);
+	} while ((selection!='a')&&(selection!='r'));
+	switch (selection) {
+		case 'a':
+		fprintf(dati, "Misurazioni effettuate in seguito ad attività fisica\n"); 
+		break;
+		case 'r':
+		fprintf(dati, "Misurazioni effettuate a riposo\n");
+		break;
+	}
+
+	do {
+		printf("Per quanti secondi vuoi misurare la tua frequenza cardiaca?\n");
+		scanf("%d", &time);
+	} while (time<2);
+	printf("Ora possiamo inziare! Premi 1 quando sei pronto per la misurazione\n");
+	scanf("%d",&input);
+	
+	mailbox[2]=input;
+	
+	printf("Misuriamo la tua frequenza cardiaca\n");
+	time=time*7;
+
+	while (time>0) {   
+
+		value = mailbox[0];
+                if (value != 0) {
+			sum=sum+value;
+			if(value<min)
+			min=value;
+			if(value>max)
+			max=value;
+
+			if(cont<DIM-1) {
+				array[cont]=value;
+				tot=tot + value;
+		     	}
+		    	else if(cont==(DIM-1)) {
+                        	array[cont]=value;
+				tot=tot + value;
+				float_to_int(tot, &tot_int);
+				printf("%d\n",tot_int/DIM);
+				fprintf(dati,"%d\t",tot_int/DIM);
+                    	}
+	
+		    	else if(cont>DIM-1) {
+				tot = tot-array[cont%DIM];
+                        	array[cont%DIM]=value;
+				tot=tot + value;
+				float_to_int(tot, &tot_int);
+				printf("%d\n",tot_int/DIM);
+				fprintf(dati,"%d\t",tot_int/DIM);
+                    	}
+	        	cont++;
+                   	mailbox[1]=value;
+			mailbox[0]=0;
+			time--;
+                }  
+	}
+	
+	printf("La misurazione è terminata. Togliere il dito\n");
+	fprintf(dati, "\n");
+	
+	switch (selection) {
+		case 'a':
+
+		fmax = 220 - age;
+		
+		printf("La frequenza massima misurata è: %d\n", max);
+		printf("La frequenza minima misurata è: %d\n", min);
+		fprintf(dati,"La frequenza massima misurata è: %d\n", max);
+		fprintf(dati, "La frequenza minima misurata è: %d\n", min);
+
+		if (50<(max/fmax)*100<60)
+
+			fprintf(dati, "Non hai compiuto nessuna attività di agonismo, stai mantenedo il tuo peso!");
+
+		else if (60<(max/fmax)*100<70)
+			fprintf(dati, "Hai effettuato un allenamento atto alla demolizione degli acidi grassi, ovvero all’aumento del catabolismo lipidico! \n Puoi seguire un allenamento simile compiendo jogging o la cyclette.\n\n");
+
+		else if (70<(max/fmax)*100<80)
+			fprintf(dati, "Hai effettuato un allenamento alla frequenza di soglia aerobica. \n Continua così se vuoi aumentare la resistenza allo sforzo muscolare!\n\n");
+
+		else if (80<(max/fmax)*100<90)
+			fprintf(dati, "Hai effettuato un allenamento ad una frequenza intermedia tra aerobica e anaerobica.\n È un buon allenamento in vista di una gara!\n\n");
+
+		else if (90<(max/fmax)*100<100)
+			fprintf(dati, "Hai effettuato un allenamento ad una soglia anaerobica o massimale! \n Tale allenamento migliora la tolleranza dei muscoli all’anaerobiosi, ovvero alla formazione di acido lattico.\n\n");
+		mailbox[3]=2;
+
+		break;
+
+		case 'r':
+		
+		avg=sum/cont;
+		float_to_int(avg, &avg_int);
+		printf("La tua frequenza media è %d \n", avg_int);
+		fprintf(dati, "La tua frequenza media è %d \n", avg_int);
+	
+
+		if (age<12) 
+			check_frequency(mailbox, dati, avg_int, 80, 100);
+		else if ((age>=12)&&(age<18))
+			check_frequency(mailbox, dati, avg_int, 70, 120);
+		else if ((age>=18)&&(age<55))
+			check_frequency(mailbox, dati, avg_int, 60, 90);
+		else if (age>=55)
+			check_frequency(mailbox, dati, avg_int, 70, 90);
+		break;
+	}
+	
+		
+	fclose(dati);
+
+	return 0;
+}

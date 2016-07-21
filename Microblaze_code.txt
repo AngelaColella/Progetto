@@ -1,0 +1,61 @@
+#include <stdio.h>
+#include "pmod.h"
+#include "microblaze_sleep.h"
+#include <stdint.h>
+#include "xparameters.h"
+#include "xgpio_l.h"
+
+#define LED_OFFSET XGPIO_DATA2_OFFSET
+#define BASEADDR XPAR_SWSLEDS_GPIO_BASEADDR
+#define MAILBOX ((volatile unsigned*)0x00007000)
+#define I2CHR_ADDR 0xA0
+
+u8 read_finger(){
+   u8 data;
+   data = 0;
+   iic_read(0, I2CHR_ADDR >> 1, &data, 1);
+   return data;
+}
+
+
+int main()
+{
+	int8_t value;
+	int8_t input;
+	int8_t cont=10;
+
+    MAILBOX[0] = 0;
+    MAILBOX[1] = 0;
+    MAILBOX[2] = 0;
+    MAILBOX[3] = 0;
+
+    configureSwitch(0, SCL, BLANK, BLANK, BLANK, SDA, BLANK, BLANK, BLANK);
+    //configureSwitch(1, BLANK, SCL, BLANK, BLANK, BLANK, SDA, BLANK, BLANK);
+
+    while (MAILBOX[3]==0) {
+    	input = MAILBOX[2];
+
+    	if (input!=0) {
+    		while (MAILBOX[3]==0) {
+    			value = read_finger();
+    			xil_printf("Ricevuto %d\n",value);
+    			MAILBOX[0]=value;
+    			while ((MAILBOX[1] != value) && (MAILBOX[3]==0));
+    			MAILBOX[1]=0;
+    			MB_Sleep(150);
+    		}
+    	}
+    }
+
+    if (MAILBOX[3]==1) {
+    	while(cont>0) {
+    		Xil_Out8(BASEADDR+LED_OFFSET, 15);
+    		MB_Sleep(500);
+    		Xil_Out8(BASEADDR+LED_OFFSET, 0);
+    		MB_Sleep(500);
+    		cont --;
+    	}
+    }
+
+    return 0;
+}
